@@ -9,6 +9,8 @@ import Foundation
 
 @available(iOS 15.0.0, *)
 public struct AsyncNetworking {
+    
+    public init() {}
         
     public func get<R: Codable>(apiUrl: ApiURL, headers: [String: String] = [:]) async throws -> R {
         try await request(apiUrl: apiUrl, method: .GET, body: EmptyRequest())
@@ -54,11 +56,25 @@ public struct AsyncNetworking {
     private func request<T:Codable, R: Codable>(apiUrl: ApiURL, method: HttpMethods, headers: [String: String] = [:], body: T) async throws -> R {
         do {
             let request = try prepareRequest(apiUrl: apiUrl, headers: headers, method: method, body: body)
-            let (data, _) = try await URLSession.shared.data(for: request)
-            guard let parsed = try? JSONDecoder().decode(R.self, from: data) else {
-                throw ApiError.parsing()
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw ApiError.badResponse()
             }
-            return parsed
+            
+            switch httpResponse.statusCode {
+            case 200 ..< 300:
+                guard let parsed = try? JSONDecoder().decode(R.self, from: data) else {
+                    throw ApiError.parsing()
+                }
+                return parsed
+            case 400 ..< 500:
+                throw ApiError.badRequest(data, httpResponse.statusCode)
+            case 500 ..< 600:
+                throw ApiError.server("Server Error", httpResponse.statusCode)
+            default:
+                throw ApiError.badRequest(data, httpResponse.statusCode)
+            }
         } catch {
             throw error
         }
